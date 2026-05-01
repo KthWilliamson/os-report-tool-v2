@@ -24,7 +24,25 @@ if st.button("Process Report"):
         OMIT_PREFIX = "Yes-"
         START_ROW_OV = 10
         PROJ_NAME_COL, POP_COL, CURR_LABOR_COL, PTD_LABOR_COL = 2, 3, 5, 6
+# --- NEW: PM INPUT FIELD ---
+with st.sidebar:
+    st.header("Project Settings")
+    pm_input = st.text_input("Enter PM Name (for new projects):")
 
+# --- INSIDE THE PROCESSING LOGIC ---
+# (After loading the workbook and defining ws_ov)
+
+PM_NAME_COL = 1  # Assuming Column A is for PM Name
+
+for proj in sorted_projects:
+    target_row = existing_rows.get(proj, current_ov_row)
+    
+    # Check if the PM field is currently empty
+    existing_pm = ws_ov.cell(row=target_row, column=PM_NAME_COL).value
+    
+    if not existing_pm and pm_input:
+        # Only write the name if the cell is empty AND the user provided an input
+        ws_ov.cell(row=target_row, column=PM_NAME_COL).value = pm_input
         # 1. PROCESS TRANSACTIONS
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
         trans_header_map = {str(cell.value).strip(): cell.column for cell in ws_trans[1] if cell.value}
