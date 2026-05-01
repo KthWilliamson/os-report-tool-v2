@@ -56,23 +56,6 @@ for proj in sorted_projects:
         current_period_totals = defaultdict(float)
         project_date_ranges = {}
         unique_projects = set()
-
-        # Read CSV
-        decoded_file = csv_file.getvalue().decode('utf-8').splitlines()
-        reader = csv.DictReader(decoded_file)
-        next_trans_row = 2
-        
-        for row in reader:
-            # Populate Transactions Tab
-            for col_name, col_idx in trans_header_map.items():
-                if col_name in row:
-                    target_cell = ws_trans.cell(row=next_trans_row, column=col_idx)
-                    if not isinstance(target_cell, MergedCell):
-                        val = row[col_name]
-                        if col_name in ['Quantity', 'Net', 'Gross']:
-                            try: val = float(val.replace(',', ''))
-                            except: pass
-                        target_cell.value = val
             
             # Logic for Overview
             full_name = row.get('Project Full Name', '').strip()
@@ -93,7 +76,35 @@ for proj in sorted_projects:
                     try: current_period_totals[full_name] += float(row['Gross'].replace(',', ''))
                     except: pass
             next_trans_row += 1
+# ... [CSV Reading Logic Above] ...
+        
+        # 2. UPDATE OVERVIEW
+        ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
+        
+        # Identify which projects are already in the Excel sheet
+        existing_rows = {}
+        for r in range(START_ROW_OV, ws_ov.max_row + 1):
+            name = ws_ov.cell(row=r, column=PROJ_NAME_COL).value
+            if name: 
+                existing_rows[str(name).strip()] = r
 
+        # Define the sorted list of projects from the CSV
+        sorted_projects = sorted(list(unique_projects))
+        current_ov_row = START_ROW_OV
+
+        # NOW run the loop
+        for proj in sorted_projects:
+            target_row = existing_rows.get(proj, current_ov_row)
+            
+            # --- PM NAME LOGIC ---
+            # Check if Column A (PM_NAME_COL) is empty
+            PM_NAME_COL = 1 
+            existing_pm = ws_ov.cell(row=target_row, column=PM_NAME_COL).value
+            
+            if not existing_pm and pm_input:
+                ws_ov.cell(row=target_row, column=PM_NAME_COL).value = pm_input
+            
+            # ... [Rest of your update logic: Dates, Labor, etc.] ...
         # 2. UPDATE OVERVIEW
         ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
         existing_rows = {}
