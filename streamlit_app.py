@@ -16,7 +16,7 @@ with st.sidebar:
     st.header("Project Settings")
     client_input = st.text_input("Enter Client Name (for new reports):")
     pm_input = st.text_input("Enter PM Name (for new reports):")
-    st.info("Inputs above only populate cells E5 (Client) and I5 (PM) if they are currently empty.")
+    st.info("Inputs above only populate Client Name and Project Manager if they are currently empty.")
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
