@@ -154,6 +154,6 @@ if st.button("Process Report"):
 
 # --- FOOTER / VERSIONING ---
 st.markdown("---")
-st.caption("📦 **Version:** 1.2.0-beta")
+st.caption("📦 **Version:** 1.2.0")
 st.caption("🚀 **Deployed:** May 1, 2026")
 st.caption("🛡️ *All data is processed in-memory and is not stored on the server.*")
