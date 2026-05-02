@@ -14,8 +14,9 @@ st.write("Upload your Workamajig CSV and your previous report to update history.
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("Project Settings")
+    client_input = st.text_input("Enter Client Name (for new reports):")
     pm_input = st.text_input("Enter PM Name (for new reports):")
-    st.info("The PM Name will be added to cell I5 if it is currently empty.")
+    st.info("Inputs above only populate cells E5 (Client) and I5 (PM) if they are currently empty.")
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
@@ -85,10 +86,13 @@ if st.button("Process Report"):
         # 2. UPDATE ACCOUNT OVERVIEW TAB
         ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
         
-        # --- NEW: PM NAME LOGIC (CELL I5) ---
-        # Peak at cell I5
-        current_pm_value = ws_ov["I5"].value
-        if not current_pm_value and pm_input:
+        # --- HEADER LOGIC (CLIENT & PM) ---
+        # Update Client Name (Cell E5) if empty
+        if not ws_ov["E5"].value and client_input:
+            ws_ov["E5"] = client_input
+            
+        # Update PM Name (Cell I5) if empty
+        if not ws_ov["I5"].value and pm_input:
             ws_ov["I5"] = pm_input
         
         # Map existing project locations
@@ -150,6 +154,6 @@ if st.button("Process Report"):
 
 # --- FOOTER / VERSIONING ---
 st.markdown("---")
-st.caption("📦 **Version:** 1.1.1-beta")
+st.caption("📦 **Version:** 1.2.0-beta")
 st.caption("🚀 **Deployed:** May 1, 2026")
 st.caption("🛡️ *All data is processed in-memory and is not stored on the server.*")
