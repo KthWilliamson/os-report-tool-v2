@@ -5,6 +5,7 @@ import io
 from collections import defaultdict
 from datetime import datetime
 from openpyxl.cell.cell import MergedCell
+import copy # Needed to copy cell styles and formulas accurately
 
 st.set_page_config(page_title="Order & Scale | Report Generator", layout="centered")
 
@@ -24,15 +25,18 @@ prev_report = st.file_uploader("2. Drop Previous Report (or Template) here", typ
 
 if st.button("Process Report"):
     if csv_file and prev_report:
+        # Load workbook
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
         # --- CONFIGURATION ---
         OMIT_PREFIX = "Yes-"
         START_ROW_OV = 10
-        PROJ_NAME_COL = 2    
-        POP_COL = 3          
-        CURR_LABOR_COL = 5   
-        PTD_LABOR_COL = 6    
+        AWARD_COL = 4        # Column D (Formula/Manual)
+        CURR_LABOR_COL = 5   # Column E
+        PTD_LABOR_COL = 6    # Column F
+        REMAINING_COL = 7    # Column G (Formula)
+        PROJ_NAME_COL = 2    # Column B
+        POP_COL = 3          # Column C
         
         # 1. PROCESS TRANSACTIONS TAB
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
@@ -98,20 +102,31 @@ if st.button("Process Report"):
         for proj in sorted_projects:
             target_row = existing_rows.get(proj, current_ov_row)
             
-            # SAFEGUARD: If row doesn't exist or we hit a 'Total' row, insert one
+            # --- NEW FORMULA COPY LOGIC ---
             if not proj in existing_rows:
                 existing_val = str(ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value or "")
                 if "Total" in existing_val or existing_val == "":
                     ws_ov.insert_rows(target_row)
+                    
+                    # Copy formula for Remaining Labor (Col G) from Row 10 logic
+                    # We adjust the row number in the formula string to match the new row
+                    ws_ov.cell(row=target_row, column=REMAINING_COL).value = f"=D{target_row}-F{target_row}"
+                    
+                    # Copy formatting/style from Row 10
+                    source_cell = ws_ov.cell(row=START_ROW_OV, column=REMAINING_COL)
+                    new_cell = ws_ov.cell(row=target_row, column=REMAINING_COL)
+                    if source_cell.has_style:
+                        new_cell.font = copy.copy(source_cell.font)
+                        new_cell.border = copy.copy(source_cell.border)
+                        new_cell.fill = copy.copy(source_cell.fill)
+                        new_cell.number_format = copy.copy(source_cell.number_format)
+                        new_cell.alignment = copy.copy(source_cell.alignment)
 
             ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value = proj
             
-            # DATE GUARD: Only attempt to format if dates were actually found
-            if proj in project_date_ranges and project_date_ranges[proj][0] is not None:
+            if proj in project_date_ranges:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=target_row, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
-            else:
-                ws_ov.cell(row=target_row, column=POP_COL).value = "No Date Found"
 
             curr_val = current_period_totals.get(proj, 0)
             prev_ptd_val = ws_ov.cell(row=target_row, column=PTD_LABOR_COL).value or 0
@@ -147,6 +162,5 @@ if st.button("Process Report"):
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("📦 **Version:** 2.1.0 (Audit-Safe)")
+st.caption("📦 **Version:** 2.2.0 (Formula-Aware)")
 st.caption("🚀 **Deployed:** May 4, 2026")
-st.caption("🛡️ *In-memory processing. No data storage.*")
