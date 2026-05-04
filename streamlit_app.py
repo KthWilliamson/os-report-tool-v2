@@ -16,7 +16,7 @@ with st.sidebar:
     st.header("Project Settings")
     client_input = st.text_input("Enter Client Name (for new reports):")
     pm_input = st.text_input("Enter PM Name (for new reports):")
-    st.info("Inputs above only populate Client Name and Project Manager if they are currently empty.")
+    st.info("Inputs above only populate cells E5 (Client) and I5 (PM) if they are currently empty.")
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
@@ -24,16 +24,15 @@ prev_report = st.file_uploader("2. Drop Previous Report (or Template) here", typ
 
 if st.button("Process Report"):
     if csv_file and prev_report:
-        # Load workbook with formulas intact
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
         # --- CONFIGURATION ---
         OMIT_PREFIX = "Yes-"
         START_ROW_OV = 10
-        PROJ_NAME_COL = 2    # Column B
-        POP_COL = 3          # Column C
-        CURR_LABOR_COL = 5   # Column E
-        PTD_LABOR_COL = 6    # Column F
+        PROJ_NAME_COL = 2    
+        POP_COL = 3          
+        CURR_LABOR_COL = 5   
+        PTD_LABOR_COL = 6    
         
         # 1. PROCESS TRANSACTIONS TAB
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
@@ -48,7 +47,6 @@ if st.button("Process Report"):
         project_date_ranges = {}
         unique_projects = set()
 
-        # Read CSV Data
         decoded_file = csv_file.getvalue().decode('utf-8').splitlines()
         reader = csv.DictReader(decoded_file)
         
@@ -86,16 +84,9 @@ if st.button("Process Report"):
         # 2. UPDATE ACCOUNT OVERVIEW TAB
         ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
         
-        # --- HEADER LOGIC (CLIENT & PM) ---
-        # Update Client Name (Cell E5) if empty
-        if not ws_ov["E5"].value and client_input:
-            ws_ov["E5"] = client_input
-            
-        # Update PM Name (Cell I5) if empty
-        if not ws_ov["I5"].value and pm_input:
-            ws_ov["I5"] = pm_input
+        if not ws_ov["E5"].value and client_input: ws_ov["E5"] = client_input
+        if not ws_ov["I5"].value and pm_input: ws_ov["I5"] = pm_input
         
-        # Map existing project locations
         existing_rows = {}
         for r in range(START_ROW_OV, ws_ov.max_row + 1):
             name = ws_ov.cell(row=r, column=PROJ_NAME_COL).value
@@ -107,18 +98,21 @@ if st.button("Process Report"):
         for proj in sorted_projects:
             target_row = existing_rows.get(proj, current_ov_row)
             
+            # SAFEGUARD: If row doesn't exist or we hit a 'Total' row, insert one
             if not proj in existing_rows:
                 existing_val = str(ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value or "")
-                if "Total" in existing_val:
+                if "Total" in existing_val or existing_val == "":
                     ws_ov.insert_rows(target_row)
 
-            # Project Name & Dates
             ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value = proj
-            if proj in project_date_ranges:
+            
+            # DATE GUARD: Only attempt to format if dates were actually found
+            if proj in project_date_ranges and project_date_ranges[proj][0] is not None:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=target_row, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
+            else:
+                ws_ov.cell(row=target_row, column=POP_COL).value = "No Date Found"
 
-            # Labor Calculations
             curr_val = current_period_totals.get(proj, 0)
             prev_ptd_val = ws_ov.cell(row=target_row, column=PTD_LABOR_COL).value or 0
             
@@ -139,7 +133,6 @@ if st.button("Process Report"):
             if not proj in existing_rows:
                 current_ov_row = max(current_ov_row, target_row) + 1
 
-        # --- GENERATE DOWNLOAD ---
         output = io.BytesIO()
         wb.save(output)
         st.success("Report processed successfully!")
@@ -152,8 +145,8 @@ if st.button("Process Report"):
     else:
         st.error("Please upload both required files.")
 
-# --- FOOTER / VERSIONING ---
+# --- FOOTER ---
 st.markdown("---")
-st.caption("📦 **Version:** 1.2.0")
-st.caption("🚀 **Deployed:** May 1, 2026")
-st.caption("🛡️ *All data is processed in-memory and is not stored on the server.*")
+st.caption("📦 **Version:** 2.1.0 (Audit-Safe)")
+st.caption("🚀 **Deployed:** May 4, 2026")
+st.caption("🛡️ *In-memory processing. No data storage.*")
