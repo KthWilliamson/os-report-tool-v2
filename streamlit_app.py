@@ -19,22 +19,21 @@ with st.sidebar:
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
-prev_report = st.file_uploader("2. Drop Previous Report (Yes&_Stoplight_Template_2.xlsx)", type=['xlsx'])
+prev_report = st.file_uploader("2. Drop Previous Report (Excel)", type=['xlsx'])
 
 if st.button("Process & Sync Report"):
     if csv_file and prev_report:
-        # Load workbook
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
-        # --- STOPLIGHT 2.0 CALIBRATION ---
+        # --- STOPLIGHT 3.7 CALIBRATION ---
         OMIT_PREFIX = "Yes-"
-        START_ROW_OV = 10      # Data begins here
-        PROJ_NAME_COL = 1      # Col A: Project Name
-        POP_COL = 2            # Col B: Period of Performance
-        AWARD_COL = 3          # Col C: Total Labor Award (MANUAL)
-        CURR_LABOR_COL = 4     # Col D: Incurred Period
-        PTD_LABOR_COL = 5      # Col E: Incurred PTD
-        REMAINING_COL = 6      # Col F: Remaining Labor (=C-E)
+        START_ROW_OV = 10      
+        PROJ_NAME_COL = 2      # Shifted to Col B
+        POP_COL = 3            # Shifted to Col C
+        AWARD_COL = 4          # Shifted to Col D (Manual)
+        CURR_LABOR_COL = 5     # Shifted to Col E
+        PTD_LABOR_COL = 6      # Shifted to Col F
+        REMAINING_COL = 7      # Shifted to Col G (=D-F)
         
         # 1. PROCESS TRANSACTIONS (Tab 1)
         ws_trans = wb.worksheets[0]
@@ -58,7 +57,6 @@ if st.button("Process & Sync Report"):
             if full_name and not full_name.startswith(OMIT_PREFIX):
                 unique_projects.add(full_name)
                 
-                # Transaction Tab Mapping
                 for col_name, col_idx in trans_header_map.items():
                     if col_name in row:
                         target_cell = ws_trans.cell(row=next_trans_row, column=col_idx)
@@ -69,7 +67,6 @@ if st.button("Process & Sync Report"):
                                 except: pass
                             target_cell.value = val
                 
-                # Dates & Labor
                 raw_date = row.get('Expense Date', '')
                 if raw_date:
                     try:
@@ -87,16 +84,15 @@ if st.button("Process & Sync Report"):
             next_trans_row += 1
 
         # 2. UPDATE ACCOUNT OVERVIEW (Tab 2)
-        ws_ov = wb.worksheets[1] # Specifically targeting the second tab
+        ws_ov = wb.worksheets[1] 
         
-        # Header logic
         if not ws_ov["E5"].value and client_input: ws_ov["E5"] = client_input
         if not ws_ov["I5"].value and pm_input: ws_ov["I5"] = pm_input
         
-        # Identify Footer Boundary
         total_row_idx = None
         for r in range(START_ROW_OV, ws_ov.max_row + 1):
-            val = str(ws_ov.cell(row=r, column=1).value or "").upper()
+            # Check Col B for the "TOTAL" label
+            val = str(ws_ov.cell(row=r, column=PROJ_NAME_COL).value or "").upper()
             if "TOTAL" in val:
                 total_row_idx = r
                 break
@@ -106,24 +102,23 @@ if st.button("Process & Sync Report"):
         required = len(sorted_projects)
         capacity = total_row_idx - START_ROW_OV
         
-        # Dynamic Row Adjustment
         if required > capacity:
             ws_ov.insert_rows(total_row_idx, amount=(required - capacity))
 
         for i, proj in enumerate(sorted_projects):
             row_idx = START_ROW_OV + i
             
-            # Col A: Project Name
+            # Col B: Project Name
             ws_ov.cell(row=row_idx, column=PROJ_NAME_COL, value=proj)
             
-            # Col B: POP Dates
+            # Col C: POP Dates
             if proj in project_date_ranges and project_date_ranges[proj][0]:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=row_idx, column=POP_COL, value=f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}")
             else:
                 ws_ov.cell(row=row_idx, column=POP_COL, value="TBD")
 
-            # Col D & E: Labor Sync
+            # Col E & F: Labor Sync
             curr_labor = current_period_totals.get(proj, 0)
             prev_ptd = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value or 0
             
@@ -136,10 +131,10 @@ if st.button("Process & Sync Report"):
             ws_ov.cell(row=row_idx, column=CURR_LABOR_COL, value=curr_labor)
             ws_ov.cell(row=row_idx, column=PTD_LABOR_COL, value=(float(prev_ptd) + float(curr_labor)))
             
-            # Col F: Formula Repair (=C - E)
-            ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=C{row_idx}-E{row_idx}"
+            # Col G: Formula Repair (=D - F)
+            ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=D{row_idx}-F{row_idx}"
 
-            # Formatting Sync (Rows 1-10 blueprint)
+            # Formatting Sync (Rows A-I)
             for c in range(1, 10):
                 source = ws_ov.cell(row=START_ROW_OV, column=c)
                 target = ws_ov.cell(row=row_idx, column=c)
@@ -154,10 +149,10 @@ if st.button("Process & Sync Report"):
         # 3. EXPORT
         output = io.BytesIO()
         wb.save(output)
-        st.success(f"Successfully processed {len(sorted_projects)} projects into the second tab.")
+        st.success(f"Successfully processed {len(sorted_projects)} projects.")
         st.download_button(label="💾 Download Final Report", data=output.getvalue(), file_name="Sync_Stoplight_Report.xlsx")
     else:
-        st.error("Please provide both the CSV and the 'Yes&_Stoplight_Template_2.xlsx' file.")
+        st.error("Missing files.")
 
 st.markdown("---")
-st.caption("📦 Version: 3.6.0 (Stoplight 2.0 Hardened)")
+st.caption("📦 Version: 3.7.0 (Column B Alignment)")
