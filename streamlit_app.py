@@ -24,20 +24,19 @@ prev_report = st.file_uploader("2. Drop Previous Report (or Template) here", typ
 
 if st.button("Process & Sync Report"):
     if csv_file and prev_report:
-        # Load workbook
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
-        # --- STOPLIGHT TEMPLATE CONFIGURATION ---
+        # --- CONFIGURATION (Synced to Stoplight Template) ---
         OMIT_PREFIX = "Yes-"
-        START_ROW_OV = 11      # Based on your CSV, data starts at row 11
+        START_ROW_OV = 10      # Data starts on row 10
         PROJ_NAME_COL = 1      # Column A: WMJ Code + Name
         POP_COL = 2            # Column B: Period of Performance
         AWARD_COL = 3          # Column C: Total Labor Award
-        CURR_LABOR_COL = 4     # Column D: Incurred Labor Period of Performance
-        PTD_LABOR_COL = 5      # Column E: Incurred Labor Project To Date
+        CURR_LABOR_COL = 4     # Column D: Incurred Period
+        PTD_LABOR_COL = 5      # Column E: Incurred PTD
         REMAINING_COL = 6      # Column F: Remaining Labor
         
-        # 1. PROCESS TRANSACTIONS TAB
+        # 1. PROCESS TRANSACTIONS
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
         trans_header_map = {str(cell.value).strip(): cell.column for cell in ws_trans[1] if cell.value}
         
@@ -84,50 +83,48 @@ if st.button("Process & Sync Report"):
                     except: pass
             next_trans_row += 1
 
-        # 2. UPDATE ACCOUNT OVERVIEW TAB
-        # Targeted search for the correct sheet name
+        # 2. UPDATE ACCOUNT OVERVIEW
         ws_ov = None
         for sheet in wb.worksheets:
             if "Account Overview" in sheet.title:
                 ws_ov = sheet
                 break
-        if not ws_ov: ws_ov = wb.worksheets[2] # Fallback
+        if not ws_ov: ws_ov = wb.worksheets[2]
         
         # Header logic
         if not ws_ov["E5"].value and client_input: ws_ov["E5"] = client_input
         if not ws_ov["I5"].value and pm_input: ws_ov["I5"] = pm_input
         
-        # Find Footer (Total row)
+        # Find Footer
         total_row_idx = None
         for r in range(START_ROW_OV, ws_ov.max_row + 1):
-            cell_val = str(ws_ov.cell(row=r, column=1).value or "").upper()
-            if "TOTAL" in cell_val:
+            val = str(ws_ov.cell(row=r, column=1).value or "").upper()
+            if "TOTAL" in val:
                 total_row_idx = r
                 break
         total_row_idx = total_row_idx or (ws_ov.max_row + 1)
 
         sorted_projects = sorted(list(unique_projects))
-        required_rows = len(sorted_projects)
-        available_slots = total_row_idx - START_ROW_OV
+        required = len(sorted_projects)
+        capacity = total_row_idx - START_ROW_OV
         
-        if required_rows > available_slots:
-            ws_ov.insert_rows(total_row_idx, amount=(required_rows - available_slots))
+        if required > capacity:
+            ws_ov.insert_rows(total_row_idx, amount=(required - capacity))
 
         # Update Loop
         for i, proj in enumerate(sorted_projects):
             row_idx = START_ROW_OV + i
             
-            # Write Project Name
+            # Write Name & Date
             ws_ov.cell(row=row_idx, column=PROJ_NAME_COL).value = proj
             
-            # Date Formatting
-            if proj in project_date_ranges and project_date_ranges[proj][0] is not None:
+            if proj in project_date_ranges and project_date_ranges[proj][0]:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=row_idx, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
             else:
                 ws_ov.cell(row=row_idx, column=POP_COL).value = "TBD"
 
-            # Labor Math
+            # Labor Sync
             curr_labor = current_period_totals.get(proj, 0)
             prev_ptd = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value or 0
             
@@ -137,17 +134,14 @@ if st.button("Process & Sync Report"):
             except:
                 prev_ptd = 0
             
-            # THE FIX: Ensure we are writing to the cell object explicitly
-            target_curr_cell = ws_ov.cell(row=row_idx, column=CURR_LABOR_COL)
-            target_ptd_cell = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL)
-            
-            target_curr_cell.value = curr_labor
-            target_ptd_cell.value = (float(prev_ptd) + float(curr_labor))
-            
-            # Formula (Award - PTD)
-            ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=C{row_idx}-E{row_idx}"
+            # --- HARDENED ASSIGNMENT ---
+            # We explicitly check if the cell was created correctly during row insertion
+            if ws_ov.cell(row=row_idx, column=CURR_LABOR_COL):
+                ws_ov.cell(row=row_idx, column=CURR_LABOR_COL).value = curr_labor
+                ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value = (float(prev_ptd) + float(curr_labor))
+                ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=C{row_idx}-E{row_idx}"
 
-            # Style Sync from Row 11 blueprint
+            # Style Cloner
             for c in range(1, 8):
                 source = ws_ov.cell(row=START_ROW_OV, column=c)
                 target = ws_ov.cell(row=row_idx, column=c)
@@ -162,11 +156,11 @@ if st.button("Process & Sync Report"):
         # 3. EXPORT
         output = io.BytesIO()
         wb.save(output)
-        st.success(f"Successfully processed {len(sorted_projects)} projects.")
+        st.success(f"Final Report Ready: {len(sorted_projects)} Projects Processed.")
         st.download_button(label="💾 Download Final Report", data=output.getvalue(), file_name="Sync_Stoplight_Report.xlsx")
     else:
         st.error("Please provide both the CSV and the Excel report.")
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("📦 Version: 3.2.0 (Stoplight Pro)")
+st.caption("📦 Version: 3.3.0 (Production Hardened)")
