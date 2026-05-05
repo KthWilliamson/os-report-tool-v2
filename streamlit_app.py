@@ -2,43 +2,43 @@ import streamlit as st
 import csv
 import openpyxl
 import io
+import copy
 from collections import defaultdict
 from datetime import datetime
 from openpyxl.cell.cell import MergedCell
-import copy # Needed to copy cell styles and formulas accurately
 
-st.set_page_config(page_title="Order & Scale | Report Generator", layout="centered")
+st.set_page_config(page_title="Order & Scale | Stoplight Automator", layout="centered")
 
-st.title("📊 Weekly Financial Report Generator")
-st.write("Upload your Workamajig CSV and your previous report to update history.")
+st.title("📊 Weekly Stoplight Report Generator")
+st.write("Upload your Workamajig CSV and your previous Stoplight Report to update history.")
 
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("Project Settings")
-    client_input = st.text_input("Enter Client Name (for new reports):")
-    pm_input = st.text_input("Enter PM Name (for new reports):")
-    st.info("Inputs above only populate cells E5 (Client) and I5 (PM) if they are currently empty.")
+    client_input = st.text_input("Enter Client Name (Cell E5):")
+    pm_input = st.text_input("Enter PM Name (Cell I5):")
+    st.info("Updates header only if cells are currently empty.")
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
 prev_report = st.file_uploader("2. Drop Previous Report (or Template) here", type=['xlsx'])
 
-if st.button("Process Report"):
+if st.button("Process & Sync Report"):
     if csv_file and prev_report:
-        # Load workbook
+        # Load workbook with formulas preserved
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
-        # --- CONFIGURATION ---
+        # --- CONFIGURATION (Based on Stoplight Template) ---
         OMIT_PREFIX = "Yes-"
         START_ROW_OV = 10
-        AWARD_COL = 4        # Column D (Formula/Manual)
-        CURR_LABOR_COL = 5   # Column E
-        PTD_LABOR_COL = 6    # Column F
-        REMAINING_COL = 7    # Column G (Formula)
-        PROJ_NAME_COL = 2    # Column B
-        POP_COL = 3          # Column C
+        PROJ_NAME_COL = 2    # Col B
+        POP_COL = 3          # Col C
+        AWARD_COL = 4        # Col D
+        CURR_LABOR_COL = 5   # Col E (Period Spend)
+        PTD_LABOR_COL = 6    # Col F (Project to Date)
+        REMAINING_COL = 7    # Col G (Formula: D-F)
         
-        # 1. PROCESS TRANSACTIONS TAB
+        # 1. CLEAN TRANSACTIONS TAB
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
         trans_header_map = {str(cell.value).strip(): cell.column for cell in ws_trans[1] if cell.value}
         
@@ -51,6 +51,7 @@ if st.button("Process Report"):
         project_date_ranges = {}
         unique_projects = set()
 
+        # Read CSV Data
         decoded_file = csv_file.getvalue().decode('utf-8').splitlines()
         reader = csv.DictReader(decoded_file)
         
@@ -88,79 +89,88 @@ if st.button("Process Report"):
         # 2. UPDATE ACCOUNT OVERVIEW TAB
         ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
         
+        # Header Check
         if not ws_ov["E5"].value and client_input: ws_ov["E5"] = client_input
         if not ws_ov["I5"].value and pm_input: ws_ov["I5"] = pm_input
         
-        existing_rows = {}
+        # Find Footer/Total Row
+        total_row_idx = None
         for r in range(START_ROW_OV, ws_ov.max_row + 1):
+            if "Total" in str(ws_ov.cell(row=r, column=PROJ_NAME_COL).value):
+                total_row_idx = r
+                break
+        total_row_idx = total_row_idx or (ws_ov.max_row + 1)
+
+        # Get existing project map
+        existing_rows = {}
+        for r in range(START_ROW_OV, total_row_idx):
             name = ws_ov.cell(row=r, column=PROJ_NAME_COL).value
             if name: existing_rows[str(name).strip()] = r
 
         sorted_projects = sorted(list(unique_projects))
-        current_ov_row = START_ROW_OV
+        
+        # Ensure we have enough space
+        required_rows = len(sorted_projects)
+        available_slots = total_row_idx - START_ROW_OV
+        if required_rows > available_slots:
+            ws_ov.insert_rows(total_row_idx, amount=(required_rows - available_slots))
 
-        for proj in sorted_projects:
-            target_row = existing_rows.get(proj, current_ov_row)
+        # Update and Style
+        for i, proj in enumerate(sorted_projects):
+            row_idx = START_ROW_OV + i
             
-            # --- NEW FORMULA COPY LOGIC ---
-            if not proj in existing_rows:
-                existing_val = str(ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value or "")
-                if "Total" in existing_val or existing_val == "":
-                    ws_ov.insert_rows(target_row)
-                    
-                    # Copy formula for Remaining Labor (Col G) from Row 10 logic
-                    # We adjust the row number in the formula string to match the new row
-                    ws_ov.cell(row=target_row, column=REMAINING_COL).value = f"=D{target_row}-F{target_row}"
-                    
-                    # Copy formatting/style from Row 10
-                    source_cell = ws_ov.cell(row=START_ROW_OV, column=REMAINING_COL)
-                    new_cell = ws_ov.cell(row=target_row, column=REMAINING_COL)
-                    if source_cell.has_style:
-                        new_cell.font = copy.copy(source_cell.font)
-                        new_cell.border = copy.copy(source_cell.border)
-                        new_cell.fill = copy.copy(source_cell.fill)
-                        new_cell.number_format = copy.copy(source_cell.number_format)
-                        new_cell.alignment = copy.copy(source_cell.alignment)
-
-            ws_ov.cell(row=target_row, column=PROJ_NAME_COL).value = proj
+            # --- DATA UPDATE ---
+            ws_ov.cell(row=row_idx, column=PROJ_NAME_COL).value = proj
             
             if proj in project_date_ranges:
                 s, e = project_date_ranges[proj]
-                ws_ov.cell(row=target_row, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
+                ws_ov.cell(row=row_idx, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
 
-            curr_val = current_period_totals.get(proj, 0)
-            prev_ptd_val = ws_ov.cell(row=target_row, column=PTD_LABOR_COL).value or 0
+            curr_labor = current_period_totals.get(proj, 0)
             
+            # Read and Update PTD
+            prev_ptd = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value or 0
             try:
-                if isinstance(prev_ptd_val, str): 
-                    prev_ptd_val = float(prev_ptd_val.replace('$', '').replace(',', ''))
-            except: 
-                prev_ptd_val = 0
+                if isinstance(prev_ptd, str):
+                    prev_ptd = float(prev_ptd.replace('$', '').replace(',', ''))
+            except:
+                prev_ptd = 0
             
-            new_ptd_val = float(prev_ptd_val) + float(curr_val)
+            ws_ov.cell(row=row_idx, column=CURR_LABOR_COL).value = curr_labor
+            ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value = (float(prev_ptd) + float(curr_labor))
             
-            ws_ov.cell(row=target_row, column=CURR_LABOR_COL).value = curr_val
-            ws_ov.cell(row=target_row, column=PTD_LABOR_COL).value = new_ptd_val
-            
-            ws_ov.cell(row=target_row, column=CURR_LABOR_COL).number_format = '"$"#,##0.00'
-            ws_ov.cell(row=target_row, column=PTD_LABOR_COL).number_format = '"$"#,##0.00'
+            # --- FORMULA REPAIR ---
+            # Corrects Column G formula for the specific row: =D - F
+            ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=D{row_idx}-F{row_idx}"
 
-            if not proj in existing_rows:
-                current_ov_row = max(current_ov_row, target_row) + 1
+            # --- STYLE CLONING (The Fix) ---
+            # Clones everything from Column B to Column G from Row 10
+            for c in range(PROJ_NAME_COL, REMAINING_COL + 1):
+                source_cell = ws_ov.cell(row=START_ROW_OV, column=c)
+                target_cell = ws_ov.cell(row=row_idx, column=c)
+                if source_cell.has_style:
+                    target_cell.font = copy.copy(source_cell.font)
+                    target_cell.border = copy.copy(source_cell.border)
+                    target_cell.fill = copy.copy(source_cell.fill)
+                    target_cell.alignment = copy.copy(source_cell.alignment)
+                    # Force currency format for financial columns
+                    if c >= AWARD_COL:
+                        target_cell.number_format = '"$"#,##0.00'
 
+        # 3. EXPORT
         output = io.BytesIO()
         wb.save(output)
-        st.success("Report processed successfully!")
+        st.success(f"Report Synced: {len(sorted_projects)} Projects Processed.")
         st.download_button(
-            label="💾 Download Updated Report",
+            label="💾 Download Updated Stoplight Report",
             data=output.getvalue(),
-            file_name="Updated_Client_Report.xlsx",
+            file_name="Updated_Stoplight_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.error("Please upload both required files.")
+        st.error("Please provide both the CSV and the Excel report.")
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("📦 **Version:** 2.2.0 (Formula-Aware)")
-st.caption("🚀 **Deployed:** May 4, 2026")
+st.caption("📦 **Version:** 3.0.0 (Stoplight Engine)")
+st.caption("🚀 **Deployed:** May 5, 2026")
