@@ -15,8 +15,8 @@ st.write("Upload your Workamajig CSV and your previous Stoplight Report.")
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("Project Settings")
-    client_input = st.text_input("Enter Client Name (Cell E5):")
-    pm_input = st.text_input("Enter PM Name (Cell I5):")
+    client_input = st.text_input("Enter Client Name (E5):")
+    pm_input = st.text_input("Enter PM Name (I5):")
 
 # --- FILE UPLOADERS ---
 csv_file = st.file_uploader("1. Drop Workamajig CSV here", type=['csv'])
@@ -24,19 +24,20 @@ prev_report = st.file_uploader("2. Drop Previous Report (or Template) here", typ
 
 if st.button("Process & Sync Report"):
     if csv_file and prev_report:
+        # Load workbook
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
-        # --- CONFIGURATION ---
+        # --- STOPLIGHT TEMPLATE CONFIGURATION ---
         OMIT_PREFIX = "Yes-"
-        START_ROW_OV = 10
-        PROJ_NAME_COL = 1    # Col A in the new template snippet
-        POP_COL = 2          # Col B
-        AWARD_COL = 3        # Col C
-        CURR_LABOR_COL = 4   # Col D
-        PTD_LABOR_COL = 5    # Col E
-        REMAINING_COL = 6    # Col F
+        START_ROW_OV = 11      # Based on your CSV, data starts at row 11
+        PROJ_NAME_COL = 1      # Column A: WMJ Code + Name
+        POP_COL = 2            # Column B: Period of Performance
+        AWARD_COL = 3          # Column C: Total Labor Award
+        CURR_LABOR_COL = 4     # Column D: Incurred Labor Period of Performance
+        PTD_LABOR_COL = 5      # Column E: Incurred Labor Project To Date
+        REMAINING_COL = 6      # Column F: Remaining Labor
         
-        # 1. CLEAN TRANSACTIONS TAB
+        # 1. PROCESS TRANSACTIONS TAB
         ws_trans = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.worksheets[0]
         trans_header_map = {str(cell.value).strip(): cell.column for cell in ws_trans[1] if cell.value}
         
@@ -84,7 +85,13 @@ if st.button("Process & Sync Report"):
             next_trans_row += 1
 
         # 2. UPDATE ACCOUNT OVERVIEW TAB
-        ws_ov = wb["Account Overview"] if "Account Overview" in wb.sheetnames else wb.worksheets[2]
+        # Targeted search for the correct sheet name
+        ws_ov = None
+        for sheet in wb.worksheets:
+            if "Account Overview" in sheet.title:
+                ws_ov = sheet
+                break
+        if not ws_ov: ws_ov = wb.worksheets[2] # Fallback
         
         # Header logic
         if not ws_ov["E5"].value and client_input: ws_ov["E5"] = client_input
@@ -110,30 +117,37 @@ if st.button("Process & Sync Report"):
         for i, proj in enumerate(sorted_projects):
             row_idx = START_ROW_OV + i
             
+            # Write Project Name
             ws_ov.cell(row=row_idx, column=PROJ_NAME_COL).value = proj
             
-            # --- DATE GUARD FIX ---
+            # Date Formatting
             if proj in project_date_ranges and project_date_ranges[proj][0] is not None:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=row_idx, column=POP_COL).value = f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}"
             else:
                 ws_ov.cell(row=row_idx, column=POP_COL).value = "TBD"
 
+            # Labor Math
             curr_labor = current_period_totals.get(proj, 0)
             prev_ptd = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value or 0
+            
             try:
                 if isinstance(prev_ptd, str):
                     prev_ptd = float(prev_ptd.replace('$', '').replace(',', ''))
             except:
                 prev_ptd = 0
             
-            ws_ov.cell(row=row_idx, column=CURR_LABOR_COL).value = curr_labor
-            ws_ov.cell(row=row_idx, column=PTD_LABOR_COL).value = (float(prev_ptd) + float(curr_labor))
+            # THE FIX: Ensure we are writing to the cell object explicitly
+            target_curr_cell = ws_ov.cell(row=row_idx, column=CURR_LABOR_COL)
+            target_ptd_cell = ws_ov.cell(row=row_idx, column=PTD_LABOR_COL)
             
-            # Formula (Assumes Award is Col C, PTD is Col E)
+            target_curr_cell.value = curr_labor
+            target_ptd_cell.value = (float(prev_ptd) + float(curr_labor))
+            
+            # Formula (Award - PTD)
             ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=C{row_idx}-E{row_idx}"
 
-            # Style Sync from Row 10
+            # Style Sync from Row 11 blueprint
             for c in range(1, 8):
                 source = ws_ov.cell(row=START_ROW_OV, column=c)
                 target = ws_ov.cell(row=row_idx, column=c)
@@ -155,4 +169,4 @@ if st.button("Process & Sync Report"):
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("📦 **Version:** 3.1.0 (Production Stable)")
+st.caption("📦 Version: 3.2.0 (Stoplight Pro)")
