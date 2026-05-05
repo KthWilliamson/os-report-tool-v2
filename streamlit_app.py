@@ -6,6 +6,7 @@ import copy
 from collections import defaultdict
 from datetime import datetime
 from openpyxl.cell.cell import MergedCell
+from openpyxl.styles import PatternFill # Needed to explicitly clear fills
 
 st.set_page_config(page_title="Order & Scale | Stoplight Automator", layout="centered")
 
@@ -25,7 +26,7 @@ if st.button("Process & Sync Report"):
     if csv_file and prev_report:
         wb = openpyxl.load_workbook(prev_report, data_only=False)
         
-        # --- STOPLIGHT 3.8 CALIBRATION ---
+        # --- STOPLIGHT 3.9 CALIBRATION ---
         OMIT_PREFIX = "Yes-"
         START_ROW_OV = 10      
         PROJ_NAME_COL = 2      # Col B
@@ -35,7 +36,7 @@ if st.button("Process & Sync Report"):
         PTD_LABOR_COL = 6      # Col F
         REMAINING_COL = 7      # Col G
         
-        # 1. PROCESS TRANSACTIONS (Tab 1)
+        # 1. PROCESS TRANSACTIONS
         ws_trans = wb.worksheets[0]
         trans_header_map = {str(cell.value).strip(): cell.column for cell in ws_trans[1] if cell.value}
         
@@ -55,7 +56,6 @@ if st.button("Process & Sync Report"):
             full_name = row.get('Project Full Name', '').strip()
             if full_name and not full_name.startswith(OMIT_PREFIX):
                 unique_projects.add(full_name)
-                # [Transaction mapping remains identical]
                 raw_date = row.get('Expense Date', '')
                 if raw_date:
                     try:
@@ -70,11 +70,10 @@ if st.button("Process & Sync Report"):
                     try: current_period_totals[full_name] += float(row['Gross'].replace(',', ''))
                     except: pass
 
-        # 2. UPDATE ACCOUNT OVERVIEW (Tab 2)
+        # 2. UPDATE ACCOUNT OVERVIEW
         ws_ov = wb.worksheets[1] 
         
-        # --- NEW: UNMERGE LOGIC ---
-        # We unmerge any cells in the data range (Col A-I) starting from START_ROW_OV
+        # Unmerge logic
         merged_ranges = list(ws_ov.merged_cells.ranges)
         for m_range in merged_ranges:
             if m_range.min_row >= START_ROW_OV:
@@ -98,10 +97,15 @@ if st.button("Process & Sync Report"):
         if required > capacity:
             ws_ov.insert_rows(total_row_idx, amount=(required - capacity))
 
+        # --- THE ZEBRA LOGIC ---
+        # Define a "No Fill" pattern
+        no_fill = PatternFill(fill_type=None)
+
         for i, proj in enumerate(sorted_projects):
             row_idx = START_ROW_OV + i
             ws_ov.cell(row=row_idx, column=PROJ_NAME_COL, value=proj)
             
+            # Dates and Math
             if proj in project_date_ranges and project_date_ranges[proj][0]:
                 s, e = project_date_ranges[proj]
                 ws_ov.cell(row=row_idx, column=POP_COL, value=f"{s.strftime('%m/%d/%y')} - {e.strftime('%m/%d/%y')}")
@@ -120,20 +124,28 @@ if st.button("Process & Sync Report"):
             ws_ov.cell(row=row_idx, column=PTD_LABOR_COL, value=(float(prev_ptd) + float(curr_labor)))
             ws_ov.cell(row=row_idx, column=REMAINING_COL).value = f"=D{row_idx}-F{row_idx}"
 
-            # Formatting Sync
+            # Formatting Sync with Alternating Colors
             for c in range(1, 10):
                 source = ws_ov.cell(row=START_ROW_OV, column=c)
                 target = ws_ov.cell(row=row_idx, column=c)
                 if source.has_style:
                     target.font = copy.copy(source.font)
                     target.border = copy.copy(source.border)
-                    target.fill = copy.copy(source.fill)
                     target.alignment = copy.copy(source.alignment)
+                    
+                    # Zebra Striping Logic: 
+                    # If the row number is EVEN (10, 12, 14), copy the grey fill.
+                    # If ODD (11, 13, 15), remove the fill.
+                    if row_idx % 2 == 0:
+                        target.fill = copy.copy(source.fill)
+                    else:
+                        target.fill = no_fill
+                    
                     if c >= AWARD_COL and c <= REMAINING_COL:
                         target.number_format = '"$"#,##0.00'
 
         # 3. EXPORT
         output = io.BytesIO()
         wb.save(output)
-        st.success(f"Processed {len(sorted_projects)} projects with unmerged formatting.")
+        st.success(f"Final Report Ready: {len(sorted_projects)} projects updated with alternating row colors.")
         st.download_button(label="💾 Download Final Report", data=output.getvalue(), file_name="Sync_Stoplight_Report.xlsx")
